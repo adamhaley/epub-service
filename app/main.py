@@ -8,54 +8,6 @@ import re
 app = FastAPI(title="EPUB Chapter Extractor")
 
 
-def extract_visible_text(html_str: str) -> str:
-    try:
-        doc = lxml_html.fromstring(html_str)
-        # Remove common non-content
-        for bad in doc.xpath("//script|//style|//nav|//header|//footer"):
-            bad.drop_tree()
-        text = doc.text_content()
-        text = re.sub(r"\s+", " ", text).strip()
-        return text
-    except Exception:
-        return ""
-
-def classify_spine_item(raw_title: str, text: str) -> dict:
-    raw = raw_title.lower()
-
-    # Strong filename hints for non-chapters
-    if any(k in raw for k in ["toc", "contents", "index", "copyright", "titlepage", "cover"]):
-        return {"content_type": "frontmatter", "is_real_chapter": False, "score": 0.0, "reason": "filename_hint"}
-
-    # Text length thresholds (tuneable)
-    n = len(text)
-
-    if n >= 1500:
-        return {"content_type": "chapter", "is_real_chapter": True, "score": 1.0, "reason": f"text_len={n}"}
-
-    if n >= 600:
-        return {"content_type": "maybe", "is_real_chapter": True, "score": 0.6, "reason": f"text_len={n}"}
-
-    return {"content_type": "frontmatter", "is_real_chapter": False, "score": 0.2, "reason": f"text_len={n}"}
-
-
-def extract_chapter_title(html_content: bytes, fallback: str) -> str:
-    try:
-        doc = lxml_html.fromstring(html_content)
-
-        # Try h1, then h2
-        for tag in ["h1", "h2"]:
-            el = doc.find(f".//{tag}")
-            if el is not None:
-                text = el.text_content().strip()
-                if text:
-                    return text
-
-    except Exception:
-        pass
-
-    return fallback
-
 
 @app.post("/parse-epub")
 async def parse_epub(file: UploadFile = File(...)):
@@ -93,49 +45,27 @@ async def parse_epub(file: UploadFile = File(...)):
         # --------------------------------------------------
         chapters = []
         order = 0
-
-        for item_id, _ in book.spine:
+        for idx, (item_id, _) in enumerate(book.spine):
             item = book.get_item_with_id(item_id)
             if not item:
                 continue
 
-            if item.get_type() != ITEM_DOCUMENT:
+            if item.get_type() != item.ITEM_DOCUMENT:
                 continue
 
             try:
                 content = item.get_content()
-                if not content:
-                    continue
-
-                html_str = content.decode("utf-8", errors="ignore")
-
-                raw_title = item.get_name()
-
-                # ---- helper calls start here ----
-                display_title = extract_chapter_title(content, raw_title)
-                visible_text = extract_visible_text(html_str)
-                classification = classify_spine_item(raw_title, visible_text)
-                # ---- helper calls end here ----
+                html_str = content.decode("utf-8", errors="ignore") if content else ""
 
                 chapters.append({
                     "id": item_id,
-                    "raw_title": raw_title,
-                    "title": display_title,
-                    "order": order,
-                    "content_type": classification["content_type"],
-                    "is_real_chapter": classification["is_real_chapter"],
-                    "score": classification["score"],
-                    "reason": classification["reason"],
-                    "text_len": len(visible_text),
-                    "text_preview": visible_text[:200],
+                    "title": item.get_name(),   # closest equivalent to item.title || item.id
+                    "order": idx,
                     "html": html_str
                 })
 
-                order += 1
-
             except Exception as e:
-                # Skip bad chapters, don't kill the whole book
-                print(f"Skipping item {item_id}: {e}")
+                print(f"[epub-service] Error reading item {item_id}: {e}")
                 continue
 
         return {
