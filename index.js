@@ -1,32 +1,29 @@
 import EPub from "epub";
 import express from "express";
-import multer from "multer";
 import fs from "fs";
-import os from "os";
 import path from "path";
 
-function writeTempFile(buffer) {
-  const tmpPath = path.join(
-    os.tmpdir(),
-    `epub-${Date.now()}-${Math.random().toString(36).slice(2)}.epub`
-  );
-  fs.writeFileSync(tmpPath, buffer);
-  return tmpPath;
-}
-
-const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
+app.use(express.json({ limit: "1mb" }));
 
-app.post("/parse-epub", upload.single("file"), async (req, res) => {
-  if (!req.file || !req.file.buffer) {
-    return res.status(400).json({ error: "No file received" });
+app.post("/parse-epub", async (req, res) => {
+  const epubPath = req.body?.path;
+
+  if (!epubPath || typeof epubPath !== "string") {
+    return res.status(400).json({ error: "Missing or invalid 'path'" });
   }
 
-  let tmpPath;
+  // Basic safety check (prevents accidental dirs / nonsense)
+  if (!epubPath.endsWith(".epub")) {
+    return res.status(400).json({ error: "Path must point to an .epub file" });
+  }
+
+  if (!fs.existsSync(epubPath)) {
+    return res.status(404).json({ error: "File not found" });
+  }
 
   try {
-    tmpPath = writeTempFile(req.file.buffer);
-    const epub = new EPub(tmpPath);
+    const epub = new EPub(epubPath);
 
     await new Promise((resolve, reject) => {
       epub.on("error", reject);
@@ -44,13 +41,11 @@ app.post("/parse-epub", upload.single("file"), async (req, res) => {
         });
       });
 
-      // 1. Skip empty chapters
+      // --- your existing filters ---
       if (!html.trim()) continue;
 
-      // 2. Skip obvious Calibre split artifacts
       if (item.id?.startsWith("index_split_")) continue;
 
-      // 3. Skip obvious non-content docs by id
       const idLower = item.id?.toLowerCase() || "";
       if (
         idLower.includes("toc") ||
@@ -61,38 +56,32 @@ app.post("/parse-epub", upload.single("file"), async (req, res) => {
         continue;
       }
 
-      // 4. Skip very small content
       const textLength = html
         .replace(/<[^>]+>/g, "")
         .trim()
         .length;
 
       if (textLength < 300) continue;
-
       if (!item.title || !item.title.trim()) continue;
 
       chapters.push({
         order: item.order,
         title: item.title,
-        html
+        html,
       });
     }
 
     res.json({
       metadata: epub.metadata,
-      chapters
+      chapters,
     });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
-  } finally {
-    if (tmpPath && fs.existsSync(tmpPath)) {
-      fs.unlinkSync(tmpPath);
-    }
   }
 });
 
 app.listen(8000, () => {
   console.log("EPUB service listening on port 8000");
 });
+
