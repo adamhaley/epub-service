@@ -51,6 +51,8 @@ app.post("/parse-epub", upload.single("file"), async (req, res) => {
 
           if (textLength < 300) continue;
 
+          if (!item.title || !item.title.trim()) continue;
+
           // 5. Only now do we accept it as a candidate chapter
           chapters.push({
             order: item.order,
