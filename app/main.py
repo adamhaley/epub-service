@@ -94,10 +94,6 @@ async def parse_epub(file: UploadFile = File(...)):
         chapters = []
         order = 0
 
-
-        chapters = []
-        order = 0
-
         for item_id, _ in book.spine:
             item = book.get_item_with_id(item_id)
             if not item:
@@ -111,27 +107,28 @@ async def parse_epub(file: UploadFile = File(...)):
                 if not content:
                     continue
 
+                html_str = content.decode("utf-8", errors="ignore")
+
                 raw_title = item.get_name()
-                
-                NON_CONTENT_HINTS = [
-                    "titlepage",
-                    "copyright",
-                    "toc",
-                    "contents",
-                    "index"
-                ]
 
-                if any(hint in raw_title.lower() for hint in NON_CONTENT_HINTS):
-                    continue
-
+                # ---- helper calls start here ----
                 display_title = extract_chapter_title(content, raw_title)
+                visible_text = extract_visible_text(html_str)
+                classification = classify_spine_item(raw_title, visible_text)
+                # ---- helper calls end here ----
 
                 chapters.append({
                     "id": item_id,
                     "raw_title": raw_title,
                     "title": display_title,
                     "order": order,
-                    "html": content.decode("utf-8", errors="ignore")
+                    "content_type": classification["content_type"],
+                    "is_real_chapter": classification["is_real_chapter"],
+                    "score": classification["score"],
+                    "reason": classification["reason"],
+                    "text_len": len(visible_text),
+                    "text_preview": visible_text[:200],
+                    "html": html_str
                 })
 
                 order += 1
@@ -140,7 +137,6 @@ async def parse_epub(file: UploadFile = File(...)):
                 # Skip bad chapters, don't kill the whole book
                 print(f"Skipping item {item_id}: {e}")
                 continue
-
 
         return {
             "metadata": metadata,
