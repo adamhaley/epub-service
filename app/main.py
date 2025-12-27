@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from ebooklib import epub
+from ebooklib import epub, ITEM_DOCUMENT
 import tempfile
 import os
 
@@ -43,21 +43,36 @@ async def parse_epub(file: UploadFile = File(...)):
         chapters = []
         order = 0
 
+
+        chapters = []
+        order = 0
+
         for item_id, _ in book.spine:
             item = book.get_item_with_id(item_id)
             if not item:
                 continue
 
-            if item.get_type() == epub.ITEM_DOCUMENT:
-                content = item.get_content().decode("utf-8", errors="ignore")
+            if item.get_type() != ITEM_DOCUMENT:
+                continue
+
+            try:
+                content = item.get_content()
+                if not content:
+                    continue
 
                 chapters.append({
                     "id": item_id,
                     "title": item.get_name(),
                     "order": order,
-                    "html": content
+                    "html": content.decode("utf-8", errors="ignore")
                 })
                 order += 1
+
+            except Exception as e:
+                # Skip bad chapters, don't kill the whole book
+                print(f"Skipping item {item_id}: {e}")
+                continue
+
 
         return {
             "metadata": metadata,
