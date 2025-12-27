@@ -3,7 +3,20 @@ import express from "express";
 import multer from "multer";
 import fs from "fs";
 
-const upload = multer({ dest: "/tmp" });
+import os from "os";
+import path from "path";
+
+function writeTempFile(buffer) {
+  const tmpPath = path.join(
+    os.tmpdir(),
+    `epub-${Date.now()}-${Math.random().toString(36).slice(2)}.epub`
+  );
+  fs.writeFileSync(tmpPath, buffer);
+  return tmpPath;
+}
+
+
+const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
 
 app.post("/parse-epub", upload.single("file"), async (req, res) => {
@@ -20,7 +33,8 @@ if (!req.file.path) {
 }
 
 try {
-    const epub = new EPub(req.file.path);
+    const tmpPath = writeTempFile(req.file.buffer);
+    const epub = new EPub(tmpPath);
 
     await new Promise((resolve, reject) => {
       epub.on("error", reject);
@@ -82,9 +96,10 @@ try {
     console.error(err);
     res.status(500).json({ error: err.message });
   } finally {
-    if (req.file?.path) {
-      fs.unlinkSync(req.file.path);
+    if (tmpPath && fs.existsSync(tmpPath)) {
+       fs.unlinkSync(tmpPath);
     }
+
   }
 });
 
