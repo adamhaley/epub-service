@@ -1,12 +1,23 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from ebooklib import epub, ITEM_DOCUMENT
-from lxml import html as lxml_html
+from ebooklib import epub
+from bs4 import BeautifulSoup
 import tempfile
 import os
-import re
+import shutil
 
-app = FastAPI(title="EPUB Chapter Extractor")
+app = FastAPI(title="EPUB Parser Service")
 
+
+def extract_text_from_item(item) -> str:
+    """
+    Extract visible paragraph text from an EPUB HTML document.
+    """
+    soup = BeautifulSoup(item.get_body_content(), "html.parser")
+    paragraphs = [
+        p.get_text(" ", strip=True)
+        for p in soup.find_all("p")
+    ]
+    return "\n\n".join(paragraphs)
 
 
 @app.post("/parse-epub")
@@ -18,56 +29,56 @@ async def parse_epub(file: UploadFile = File(...)):
 
     try:
         # --------------------------------------------------
-        # 1. Save uploaded EPUB
+        # Save uploaded EPUB to temp file
         # --------------------------------------------------
         with tempfile.NamedTemporaryFile(delete=False, suffix=".epub") as tmp:
-            tmp.write(await file.read())
+            shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
 
         # --------------------------------------------------
-        # 2. Load EPUB
+        # Load EPUB
         # --------------------------------------------------
         book = epub.read_epub(tmp_path)
 
         # --------------------------------------------------
-        # 3. Metadata
+        # Metadata (minimal, safe)
         # --------------------------------------------------
+        def get_meta(name):
+            values = book.get_metadata("DC", name)
+            return values[0][0] if values else None
+
         metadata = {
-            "title": _first_meta(book, "title"),
-            "creator": _first_meta(book, "creator"),
-            "language": _first_meta(book, "language"),
-            "identifier": _first_meta(book, "identifier"),
-            "publisher": _first_meta(book, "publisher"),
+            "title": get_meta("title"),
+            "creator": get_meta("creator"),
+            "language": get_meta("language"),
+            "identifier": get_meta("identifier"),
+            "publisher": get_meta("publisher"),
         }
 
         # --------------------------------------------------
-        # 4. Chapters (spine order)
+        # Extract chapters (boring by design)
         # --------------------------------------------------
         chapters = []
         order = 0
 
-        for idx, (item_id, _) in enumerate(book.spine):
+        for item_id, _ in book.spine:
             item = book.get_item_with_id(item_id)
             if not item:
                 continue
 
-            if not isinstance(item, EpubHtml):
+            if item.get_type() != epub.ITEM_DOCUMENT:
                 continue
 
-            try:
-                content = item.get_content()
-                html_str = content.decode("utf-8", errors="ignore") if content else ""
-
-                chapters.append({
-                    "id": item_id,
-                    "title": item.get_name(),
-                    "order": idx,
-                    "html": html_str
-                })
-
-            except Exception as e:
-                print(f"[epub-service] Error reading item {item_id}: {e}")
+            text = extract_text_from_item(item)
+            if not text.strip():
                 continue
+
+            chapters.append({
+                "order": order,
+                "content": text
+            })
+
+            order += 1
 
         return {
             "metadata": metadata,
@@ -77,9 +88,4 @@ async def parse_epub(file: UploadFile = File(...)):
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
-
-
-def _first_meta(book, name):
-    values = book.get_metadata("DC", name)
-    return values[0][0] if values else None
 
