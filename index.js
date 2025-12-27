@@ -18,22 +18,47 @@ app.post("/parse-epub", upload.single("file"), async (req, res) => {
 
     const chapters = [];
 
-    for (const item of epub.flow) {
-      const html = await new Promise((resolve, reject) => {
-        epub.getChapter(item.id, (err, text) => {
-          if (err) reject(err);
-          else resolve(text || "");
-        });
-      });
+      for (const item of epub.flow) {
+          const html = await new Promise((resolve, reject) => {
+            epub.getChapter(item.id, (err, text) => {
+              if (err) reject(err);
+              else resolve(text || "");
+            });
+          });
 
-      if (!html.trim()) continue;
+          // 1. Skip empty chapters
+          if (!html.trim()) continue;
 
-      chapters.push({
-        order: item.order,
-        title: item.title || null,
-        html
-      });
-    }
+          // 2. Skip obvious Calibre split artifacts
+          if (item.id?.startsWith("index_split_")) continue;
+
+          // 3. Skip obvious non-content docs by id
+          const idLower = item.id?.toLowerCase() || "";
+          if (
+            idLower.includes("toc") ||
+            idLower.includes("index") ||
+            idLower.includes("glossary") ||
+            idLower.includes("copyright")
+          ) {
+            continue;
+          }
+
+          // 4. Skip very small content (covers, separators, nav pages)
+          const textLength = html
+            .replace(/<[^>]+>/g, "")
+            .trim()
+            .length;
+
+          if (textLength < 300) continue;
+
+          // 5. Only now do we accept it as a candidate chapter
+          chapters.push({
+            order: item.order,
+            title: item.title || null,
+            html
+          });
+        }
+
 
     res.json({
       metadata: epub.metadata,
