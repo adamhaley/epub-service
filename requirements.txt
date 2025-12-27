@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+ebooklib
+lxml
+python-multipart
+
