@@ -7,7 +7,19 @@ const upload = multer({ dest: "/tmp" });
 const app = express();
 
 app.post("/parse-epub", upload.single("file"), async (req, res) => {
-  try {
+ 
+if (!req.file) {
+  return res.status(400).json({ error: "No file received" });
+}
+
+if (!req.file.path) {
+  return res.status(400).json({
+    error: "File received but no path set (multer storage issue)",
+    fileKeys: Object.keys(req.file),
+  });
+}
+
+try {
     const epub = new EPub(req.file.path);
 
     await new Promise((resolve, reject) => {
