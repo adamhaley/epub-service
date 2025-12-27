@@ -45,12 +45,13 @@ async def parse_epub(file: UploadFile = File(...)):
         # --------------------------------------------------
         chapters = []
         order = 0
+
         for idx, (item_id, _) in enumerate(book.spine):
             item = book.get_item_with_id(item_id)
             if not item:
                 continue
 
-            if item.get_type() != item.ITEM_DOCUMENT:
+            if not isinstance(item, EpubHtml):
                 continue
 
             try:
@@ -59,7 +60,7 @@ async def parse_epub(file: UploadFile = File(...)):
 
                 chapters.append({
                     "id": item_id,
-                    "title": item.get_name(),   # closest equivalent to item.title || item.id
+                    "title": item.get_name(),
                     "order": idx,
                     "html": html_str
                 })
